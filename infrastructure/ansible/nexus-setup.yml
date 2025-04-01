@@ -1,0 +1,106 @@
+---
+- name: Install and Configure Nexus and Trivy
+  hosts: nexus
+  become: yes
+  tasks:
+    - name: Update packages
+      yum:
+        name: '*'
+        state: latest
+        update_only: yes
+      when: ansible_os_family == "RedHat"
+
+    - name: Install Java 8
+      yum:
+        name: java-1.8.0-openjdk-devel
+        state: present
+      when: ansible_os_family == "RedHat"
+
+    - name: Download Nexus
+      get_url:
+        url: https://download.sonatype.com/nexus/3/latest-unix.tar.gz
+        dest: /tmp/nexus.tar.gz
+
+    - name: Create Nexus directory
+      file:
+        path: /opt/nexus
+        state: directory
+
+    - name: Extract Nexus
+      unarchive:
+        src: /tmp/nexus.tar.gz
+        dest: /opt/
+        remote_src: yes
+        creates: /opt/nexus-3*
+
+    - name: Create nexus user
+      user:
+        name: nexus
+        comment: Nexus Repository User
+        system: yes
+
+    - name: Find Nexus directory
+      find:
+        paths: /opt
+        patterns: nexus-3*
+        file_type: directory
+      register: nexus_dir
+
+    - name: Set Nexus ownership
+      file:
+        path: "{{ item.path }}"
+        owner: nexus
+        group: nexus
+        recurse: yes
+      with_items: "{{ nexus_dir.files }}"
+
+    - name: Set Nexus data ownership
+      file:
+        path: /opt/sonatype-work
+        owner: nexus
+        group: nexus
+        recurse: yes
+        state: directory
+
+    - name: Create Nexus service file
+      copy:
+        content: |
+          [Unit]
+          Description=Nexus Repository Manager
+          After=network.target
+
+          [Service]
+          Type=forking
+          ExecStart={{ nexus_dir.files[0].path }}/bin/nexus start
+          ExecStop={{ nexus_dir.files[0].path }}/bin/nexus stop
+          User=nexus
+          Group=nexus
+          Restart=on-abort
+
+          [Install]
+          WantedBy=multi-user.target
+        dest: /etc/systemd/system/nexus.service
+      when: nexus_dir.files | length > 0
+
+    - name: Start and enable Nexus service
+      systemd:
+        name: nexus
+        state: started
+        enabled: yes
+        daemon_reload: yes
+
+    # Install Trivy
+    - name: Install dependencies for Trivy
+      yum:
+        name:
+          - wget
+          - tar
+          - gzip
+        state: present
+      when: ansible_os_family == "RedHat"
+
+    - name: Install Trivy
+      shell: |
+        curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sh -s -- -b /usr/local/bin
+      args:
+        creates: /usr/local/bin/trivy

@@ -1,0 +1,51 @@
+---
+- name: Deploy Java Web Application
+  hosts: environments
+  become: yes
+  vars:
+    app_name: java-web-app
+    tomcat_webapps: /opt/tomcat/webapps
+  
+  tasks:
+    - name: Ensure Tomcat is installed
+      package:
+        name:
+          - tomcat
+          - tomcat-webapps
+        state: present
+      
+    - name: Start and enable Tomcat service
+      systemd:
+        name: tomcat
+        state: started
+        enabled: yes
+
+    - name: Create app directory
+      file:
+        path: "{{ tomcat_webapps }}/{{ app_name }}"
+        state: directory
+        owner: tomcat
+        group: tomcat
+        mode: 0755
+
+    - name: Download application WAR from Nexus
+      get_url:
+        url: "http://{{ nexus_host }}:8081/repository/maven-releases/com/example/{{ app_name }}/1.0-SNAPSHOT/{{ app_name }}.war"
+        dest: "/tmp/{{ app_name }}.war"
+      register: download_result
+      ignore_errors: yes
+
+    - name: Deploy WAR file to Tomcat
+      copy:
+        src: "/tmp/{{ app_name }}.war"
+        dest: "{{ tomcat_webapps }}/{{ app_name }}.war"
+        owner: tomcat
+        group: tomcat
+        mode: 0644
+      when: download_result is successful
+
+    - name: Restart Tomcat to apply changes
+      systemd:
+        name: tomcat
+        state: restarted
+      when: download_result is successful

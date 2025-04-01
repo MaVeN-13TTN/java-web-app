@@ -1,0 +1,107 @@
+---
+- name: Install and Configure SonarQube
+  hosts: sonarqube
+  become: yes
+  vars:
+    sonar_plugins:
+      - github
+      - java
+      - jacoco
+  
+  tasks:
+    - name: Update packages
+      yum:
+        name: '*'
+        state: latest
+        update_only: yes
+      when: ansible_os_family == "RedHat"
+
+    - name: Install Java 11
+      yum:
+        name: java-11-openjdk-devel
+        state: present
+      when: ansible_os_family == "RedHat"
+
+    - name: Install PostgreSQL
+      yum:
+        name: 
+          - postgresql
+          - postgresql-server
+        state: present
+      when: ansible_os_family == "RedHat"
+
+    - name: Initialize PostgreSQL database
+      command: postgresql-setup initdb
+      args:
+        creates: /var/lib/pgsql/data/postgresql.conf
+      when: ansible_os_family == "RedHat"
+
+    - name: Start and enable PostgreSQL
+      systemd:
+        name: postgresql
+        state: started
+        enabled: yes
+
+    - name: Download SonarQube
+      get_url:
+        url: https://binaries.sonarsource.com/Distribution/sonarqube/sonarqube-9.3.0.51899.zip
+        dest: /tmp/sonarqube.zip
+
+    - name: Install unzip
+      yum:
+        name: unzip
+        state: present
+      when: ansible_os_family == "RedHat"
+
+    - name: Extract SonarQube
+      unarchive:
+        src: /tmp/sonarqube.zip
+        dest: /opt/
+        remote_src: yes
+
+    - name: Create sonar user
+      user:
+        name: sonar
+        home: /opt/sonarqube
+        shell: /bin/bash
+
+    - name: Set SonarQube ownership
+      file:
+        path: /opt/sonarqube-9.3.0.51899
+        owner: sonar
+        group: sonar
+        recurse: yes
+
+    - name: Create symbolic link
+      file:
+        src: /opt/sonarqube-9.3.0.51899
+        dest: /opt/sonarqube
+        state: link
+    
+    # New configurations for GitHub integration
+    - name: Configure SonarQube for GitHub integration
+      blockinfile:
+        path: /opt/sonarqube/conf/sonar.properties
+        block: |
+          # GitHub integration
+          sonar.github.endpoint=https://api.github.com
+          sonar.github.appId.secured=your-github-app-id
+          sonar.github.privateKey.secured=/opt/sonarqube/conf/github-private-key.pem
+          sonar.pullrequest.provider=github
+          sonar.pullrequest.github.repository=MaVeN-13TTN/java-web-app
+        create: yes
+        owner: sonar
+        group: sonar
+        mode: '0644'
+      notify: Restart SonarQube
+
+    - name: Start SonarQube
+      become: yes
+      become_user: sonar
+      command: /opt/sonarqube/bin/linux-x86-64/sonar.sh start
+      
+  handlers:
+    - name: Restart SonarQube
+      become: yes
+      become_user: sonar
+      command: /opt/sonarqube/bin/linux-x86-64/sonar.sh restart

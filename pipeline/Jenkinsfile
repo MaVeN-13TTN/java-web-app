@@ -1,0 +1,103 @@
+pipeline {
+    agent any
+    environment {
+        SONAR_TOKEN = credentials('sonar-token')
+        NEXUS_URL = "http://<Nexus-EC2-IP>:8081/repository/maven-releases/"
+        SONAR_HOST_URL = "http://<SonarQube-EC2-IP>:9000"
+        NEXUS_HOST = "<Nexus-EC2-IP>"
+        GITHUB_REPO = "https://github.com/MaVeN-13TTN/java-web-app.git"
+        GITHUB_BRANCH = "main"
+    }
+    
+    triggers {
+        githubPush()
+    }
+    
+    stages {
+        stage('Checkout') {
+            steps {
+                checkout([$class: 'GitSCM', 
+                    branches: [[name: "*/${GITHUB_BRANCH}"]], 
+                    doGenerateSubmoduleConfigurations: false, 
+                    extensions: [], 
+                    submoduleCfg: [], 
+                    userRemoteConfigs: [[
+                        credentialsId: 'github-credentials', 
+                        url: "${GITHUB_REPO}"
+                    ]]
+                ])
+            }
+        }
+        
+        stage('Build') {
+            steps {
+                sh 'chmod +x ./pipeline/scripts/build.sh'
+                sh './pipeline/scripts/build.sh'
+            }
+        }
+        
+        stage('Code Quality') {
+            steps {
+                sh 'chmod +x ./pipeline/scripts/quality.sh'
+                sh './pipeline/scripts/quality.sh'
+            }
+        }
+        
+        stage('Security Scan') {
+            steps {
+                sh 'chmod +x ./pipeline/scripts/security-scan.sh'
+                sh './pipeline/scripts/security-scan.sh'
+            }
+        }
+        
+        stage('Deploy to Nexus') {
+            steps {
+                sh "mvn deploy -DaltDeploymentRepository=nexus::default::${NEXUS_URL}"
+            }
+        }
+        
+        stage('Deploy to Dev') {
+            steps {
+                sh 'chmod +x ./pipeline/scripts/deploy.sh'
+                sh './pipeline/scripts/deploy.sh dev'
+            }
+        }
+        
+        stage('Deploy to Build') {
+            steps {
+                input message: 'Approve deployment to Build environment?'
+                sh './pipeline/scripts/deploy.sh build'
+            }
+        }
+        
+        stage('Deploy to Production') {
+            steps {
+                input message: 'Approve deployment to Production environment?'
+                sh './pipeline/scripts/deploy.sh deploy'
+            }
+        }
+    }
+    
+    post {
+        success {
+            echo 'Pipeline completed successfully!'
+            githubSetStatus(
+                context: 'continuous-integration',
+                description: 'Pipeline completed successfully',
+                status: 'SUCCESS'
+            )
+        }
+        failure {
+            echo 'Pipeline failed!'
+            githubSetStatus(
+                context: 'continuous-integration',
+                description: 'Pipeline failed',
+                status: 'FAILURE'
+            )
+        }
+        always {
+            echo 'Sending notifications...'
+            // Add notification steps here (email, Slack, etc.)
+        }
+    }
+}

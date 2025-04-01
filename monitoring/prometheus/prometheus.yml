@@ -1,0 +1,14 @@
+# Prometheus configuration file
+
+scrape_configs:
+  - job_name: 'jenkins'
+    static_configs:
+      - targets: ['<Jenkins-EC2-IP>:8080']
+
+  - job_name: 'sonarqube'
+    static_configs:
+      - targets: ['<SonarQube-EC2-IP>:9000']
+
+  - job_name: 'nexus'
+    static_configs:
+      - targets: ['<Nexus-EC2-IP>:8081']

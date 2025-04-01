@@ -1,0 +1,123 @@
+---
+- name: Install and Configure Jenkins
+  hosts: jenkins
+  become: yes
+  vars:
+    jenkins_plugins:
+      - git
+      - github
+      - github-branch-source
+      - github-api
+      - github-oauth
+      - github-pullrequest
+      - github-scm-trait-notification-context
+      - generic-webhook-trigger
+      - credentials
+      - credentials-binding
+  
+  tasks:
+    - name: Update packages
+      yum:
+        name: '*'
+        state: latest
+        update_only: yes
+      when: ansible_os_family == "RedHat"
+
+    - name: Install Java 11
+      yum:
+        name: java-11-openjdk-devel
+        state: present
+      when: ansible_os_family == "RedHat"
+
+    - name: Add Jenkins repository
+      get_url:
+        url: https://pkg.jenkins.io/redhat-stable/jenkins.repo
+        dest: /etc/yum.repos.d/jenkins.repo
+
+    - name: Import Jenkins repository key
+      rpm_key:
+        state: present
+        key: https://pkg.jenkins.io/redhat-stable/jenkins.io.key
+
+    - name: Install Jenkins
+      yum:
+        name: jenkins
+        state: present
+      when: ansible_os_family == "RedHat"
+
+    - name: Install Maven
+      yum:
+        name: maven
+        state: present
+      when: ansible_os_family == "RedHat"
+
+    - name: Start and enable Jenkins service
+      systemd:
+        name: jenkins
+        state: started
+        enabled: yes
+
+    - name: Wait for Jenkins to start
+      uri:
+        url: http://localhost:8080/
+        status_code: 200
+      register: result
+      until: result.status == 200
+      retries: 30
+      delay: 10
+      ignore_errors: yes
+      
+    # New tasks for GitHub integration
+    - name: Get Jenkins admin password
+      command: cat /var/lib/jenkins/secrets/initialAdminPassword
+      register: jenkins_admin_password
+      changed_when: false
+      
+    - name: Install Jenkins CLI
+      get_url:
+        url: "http://localhost:8080/jnlpJars/jenkins-cli.jar"
+        dest: "/tmp/jenkins-cli.jar"
+        mode: '0644'
+        
+    - name: Install Jenkins plugins
+      command: >
+        java -jar /tmp/jenkins-cli.jar -s http://localhost:8080/ -auth admin:{{ jenkins_admin_password.stdout }} 
+        install-plugin {{ jenkins_plugins | join(' ') }} -deploy
+      register: plugin_result
+      changed_when: "'Installing' in plugin_result.stdout"
+      notify: Restart Jenkins
+      
+    - name: Create GitHub webhook credentials
+      shell: |
+        cat > /tmp/create_credential.groovy << 'EOF'
+        import jenkins.model.*
+        import com.cloudbees.plugins.credentials.*
+        import com.cloudbees.plugins.credentials.common.*
+        import com.cloudbees.plugins.credentials.domains.*
+        import com.cloudbees.plugins.credentials.impl.*
+        import org.jenkinsci.plugins.plaincredentials.impl.*
+        
+        def domain = Domain.global()
+        def store = Jenkins.instance.getExtensionList('com.cloudbees.plugins.credentials.SystemCredentialsProvider')[0].getStore()
+        
+        def githubCredentials = new UsernamePasswordCredentialsImpl(
+          CredentialsScope.GLOBAL,
+          'github-credentials',
+          'GitHub access',
+          'MaVeN-13TTN',
+          'your-github-token'
+        )
+        
+        store.addCredentials(domain, githubCredentials)
+        EOF
+        
+        java -jar /tmp/jenkins-cli.jar -s http://localhost:8080/ -auth admin:{{ jenkins_admin_password.stdout }} groovy = < /tmp/create_credential.groovy
+      args:
+        creates: /var/lib/jenkins/.ssh/github_credentials_created
+      notify: Restart Jenkins
+        
+  handlers:
+    - name: Restart Jenkins
+      systemd:
+        name: jenkins
+        state: restarted
