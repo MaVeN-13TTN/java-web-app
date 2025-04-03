@@ -5,7 +5,7 @@ project_name      = "java-cicd"
 vpc_cidr          = "10.0.0.0/16"
 subnet_cidr       = "10.0.1.0/24"
 availability_zone = "us-east-1a"
-aws_ami           = "ami-0c02fb55956c7d316" # Amazon Linux 2 AMI, update as needed
+aws_ami           = "ami-05d9b53b86dec19c8" # Amazon Linux 2023 AMI
 key_name          = "DevOpsKey"
 
 # Instance types configuration

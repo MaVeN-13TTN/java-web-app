@@ -10,12 +10,38 @@
         update_only: yes
       when: ansible_os_family == "RedHat"
 
-    - name: Install Java 8
-      yum:
-        name: java-1.8.0-openjdk-devel
-        state: present
-      when: ansible_os_family == "RedHat"
+    # Check if system is Amazon Linux
+    - name: Check if system is Amazon Linux
+      command: grep -q "Amazon Linux" /etc/os-release
+      register: is_amazon_linux
+      ignore_errors: yes
+      changed_when: false
 
+    # Java installation for Amazon Linux 2023
+    - name: Install Java 11 on Amazon Linux 2023
+      yum:
+        name: java-11-amazon-corretto-devel
+        state: present
+      when: is_amazon_linux.rc == 0
+
+    # Java installation for other RedHat systems
+    - name: Install Java 11 on other RedHat systems
+      yum:
+        name: java-11-openjdk-devel
+        state: present
+      when: is_amazon_linux.rc != 0 and ansible_os_family == "RedHat"
+
+    # Display installed Java version for validation
+    - name: Check installed Java version
+      command: java -version
+      register: java_version
+      changed_when: false
+    
+    - name: Display installed Java version
+      debug:
+        var: java_version.stderr
+
+    # Rest of the Nexus setup remains the same
     - name: Download Nexus
       get_url:
         url: https://download.sonatype.com/nexus/3/latest-unix.tar.gz

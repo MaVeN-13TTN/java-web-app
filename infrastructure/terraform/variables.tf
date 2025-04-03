@@ -1,43 +1,42 @@
 # Define variables for the CI/CD pipeline infrastructure
 
 variable "aws_region" {
-  description = "AWS region to deploy the infrastructure"
-  type        = string
+  description = "AWS region to deploy to"
   default     = "us-east-1"
-}
-
-variable "project_name" {
-  description = "Name of the project"
-  type        = string
-  default     = "java-cicd"
 }
 
 variable "vpc_cidr" {
   description = "CIDR block for the VPC"
-  type        = string
   default     = "10.0.0.0/16"
 }
 
 variable "subnet_cidr" {
   description = "CIDR block for the subnet"
-  type        = string
   default     = "10.0.1.0/24"
 }
 
 variable "availability_zone" {
-  description = "Availability zone for the subnet"
-  type        = string
+  description = "Availability zone for the primary subnet"
   default     = "us-east-1a"
 }
 
 variable "aws_ami" {
-  description = "Amazon Linux 2 AMI ID"
-  type        = string
-  default     = "ami-0c02fb55956c7d316" # Update with the latest Amazon Linux 2 AMI ID
+  description = "AMI ID to use for EC2 instances - Amazon Linux 2023"
+  default     = "ami-05d9b53b86dec19c8" # Amazon Linux 2023
+}
+
+variable "key_name" {
+  description = "SSH key name to use for EC2 instances"
+  default     = "DevOpsKey"
+}
+
+variable "project_name" {
+  description = "Name of the project"
+  default     = "java-cicd"
 }
 
 variable "instance_types" {
-  description = "EC2 instance types for each server"
+  description = "Instance types for each server"
   type        = map(string)
   default = {
     jenkins    = "t2.medium"
@@ -51,8 +50,26 @@ variable "instance_types" {
   }
 }
 
-variable "key_name" {
-  description = "Name of the SSH key pair"
-  type        = string
-  default     = "DevOpsKey"
+# Security group variables for refined security controls
+variable "admin_cidr_blocks" {
+  description = "CIDR blocks for administrative access"
+  type        = list(string)
+  default     = ["0.0.0.0/0"] # In production, this should be restricted to VPN or admin IP ranges
+}
+
+variable "github_webhook_cidr_blocks" {
+  description = "CIDR blocks for GitHub webhook access"
+  type        = list(string)
+  default = [
+    "192.30.252.0/22",  # GitHub webhooks
+    "185.199.108.0/22", # GitHub webhooks
+    "140.82.112.0/20",  # GitHub webhooks
+    "143.55.64.0/20"    # GitHub webhooks
+  ]
+}
+
+variable "app_access_cidr_blocks" {
+  description = "CIDR blocks for application access"
+  type        = list(string)
+  default     = ["0.0.0.0/0"] # In production, this could be more restricted
 }

@@ -3,8 +3,8 @@
 ## Technical Documentation
 
 **Date:** April 2025  
-**Version:** 1.0.0  
-**Author:** MaVeN-13TTN
+**Version:** 1.0.1  
+**Author:** DevOps Team
 
 ## Table of Contents
 
@@ -257,9 +257,23 @@ terraform plan
 terraform apply
 ```
 
-5. **Note the Output Values**:
+5. **Update Configuration with IP Addresses**:
 
-Record the output values (IP addresses) for use in the next steps.
+After deploying the infrastructure, use the automation script to update all configuration files with the EC2 IP addresses:
+
+```bash
+cd /path/to/java-web-app
+./infrastructure/scripts/update_ip_addresses.sh
+```
+
+This script will:
+
+- Retrieve all EC2 IP addresses from Terraform outputs
+- Update Ansible inventory, Jenkinsfile, GitHub workflow, and Prometheus configuration
+- Create backups of all modified files
+- Generate a summary report with server information and service URLs
+
+The script eliminates manual IP address updates and ensures consistency across all configuration files.
 
 ### Service Configuration with Ansible
 
@@ -307,11 +321,12 @@ ansible-playbook monitoring-setup.yml
    - Add a rule to protect the main branch
    - Require pull request reviews before merging
    - Require status checks to pass before merging
+   - Note: If you are the only developer on the project, branch protection rules are optional but still recommended for maintaining code quality
 
 3. **Configure GitHub Webhook**:
 
    - Go to Settings > Webhooks in your repository
-   - Add webhook for your Jenkins server: `http://<Jenkins-IP>:8080/github-webhook/`
+   - Add webhook for your Jenkins server: `http://34.207.76.202:8080/github-webhook/`
    - Select content type: `application/json`
    - Select events: Push, Pull requests, and Pull request reviews
 
@@ -388,14 +403,9 @@ Pre-configured dashboards are provided for:
 
 ### Accessing Services
 
-| Service    | URL                           | Default Credentials                 |
-| ---------- | ----------------------------- | ----------------------------------- |
-| Jenkins    | http://\<Jenkins-IP\>:8080    | admin/password (change immediately) |
-| SonarQube  | http://\<SonarQube-IP\>:9000  | admin/admin (change immediately)    |
-| Nexus      | http://\<Nexus-IP\>:8081      | admin/admin123 (change immediately) |
-| Prometheus | http://\<Prometheus-IP\>:9090 | N/A                                 |
-| Grafana    | http://\<Grafana-IP\>:3000    | admin/admin (change immediately)    |
 
+| Service    | URL                                  | Default Credentials                 |
+| ---------- | ------------------------------------ | ----------------------------------- |
 ### Running the Pipeline
 
 1. **Configure Jenkins**:
@@ -422,7 +432,7 @@ Pre-configured dashboards are provided for:
 ### GitHub Workflow
 
 1. **Development Workflow**:
-   - Clone the repository: `git clone https://github.com/MaVeN-13TTN/java-web-app.git`
+   - Clone the repository: `git clone https://github.com/your-organization/java-web-app.git`
    - Create a feature branch: `git checkout -b feature/new-feature`
    - Make changes to the code
    - Commit and push changes: `git push origin feature/new-feature`

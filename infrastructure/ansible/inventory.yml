@@ -5,17 +5,17 @@ all:
   children:
     jenkins:
       hosts:
-        jenkins:
+        jenkins-server:
           ansible_host: "<Jenkins-EC2-IP>"
     
     sonarqube:
       hosts:
-        sonarqube:
+        sonarqube-server:
           ansible_host: "<SonarQube-EC2-IP>"
     
     nexus:
       hosts:
-        nexus:
+        nexus-server:
           ansible_host: "<Nexus-EC2-IP>"
     
     monitoring:
@@ -27,17 +27,17 @@ all:
     
     dev:
       hosts:
-        dev:
+        dev-server:
           ansible_host: "<Dev-Environment-EC2-IP>"
     
     build:
       hosts:
-        build:
+        build-server:
           ansible_host: "<Build-Environment-EC2-IP>"
     
     deploy:
       hosts:
-        deploy:
+        deploy-server:
           ansible_host: "<Deployment-Environment-EC2-IP>"
     
     cicd:
@@ -55,4 +55,4 @@ all:
   vars:
     ansible_user: "ec2-user"
     ansible_ssh_private_key_file: "~/.ssh/DevOpsKey.pem"
-    ansible_python_interpreter: "/usr/bin/python"
+    ansible_python_interpreter: "/usr/bin/python3"

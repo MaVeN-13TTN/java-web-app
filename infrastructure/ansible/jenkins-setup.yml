@@ -15,19 +15,71 @@
       - credentials
       - credentials-binding
   
+  # Import GitHub credentials from the encrypted vault file
+  vars_files:
+    - vars/github_credentials.yml
+  
   tasks:
-    - name: Update packages
+    - name: Check if system is Amazon Linux
+      command: grep -q "Amazon Linux" /etc/os-release
+      register: is_amazon_linux
+      ignore_errors: yes
+      changed_when: false
+
+    - name: Install required Python modules for package management
+      raw: |
+        if command -v yum &>/dev/null; then
+          if command -v dnf &>/dev/null; then
+            yum install -y python3-dnf
+          else
+            yum install -y python3-yum
+          fi
+        fi
+      register: python_dep_install
+      changed_when: "'Nothing to do' not in python_dep_install.stdout|default('')"
+      ignore_errors: yes
+
+    - name: Update packages with dnf
+      dnf:
+        name: '*'
+        state: latest
+        update_only: yes
+      when: ansible_os_family == "RedHat" and ansible_pkg_mgr == "dnf"
+      ignore_errors: yes
+
+    - name: Update packages with yum
       yum:
         name: '*'
         state: latest
         update_only: yes
-      when: ansible_os_family == "RedHat"
+      when: ansible_os_family == "RedHat" and ansible_pkg_mgr == "yum"
+      ignore_errors: yes
 
-    - name: Install Java 11
-      yum:
-        name: java-11-openjdk-devel
+    # Install Java 17 on Amazon Linux 2023
+    - name: Install Java 17 on Amazon Linux 2023
+      package:
+        name:
+          - java-17-amazon-corretto
+          - java-17-amazon-corretto-devel
         state: present
-      when: ansible_os_family == "RedHat"
+      when: is_amazon_linux.rc == 0
+
+    # Java installation for other RedHat systems
+    - name: Install Java 17 on other RedHat systems
+      package:
+        name: java-17-openjdk-devel
+        state: present
+      when: is_amazon_linux.rc != 0 and ansible_os_family == "RedHat"
+
+    # Display installed Java version for validation
+    - name: Check installed Java version
+      command: java -version
+      register: java_version
+      changed_when: false
+    
+    - name: Display installed Java version
+      debug:
+        var: java_version.stderr
 
     - name: Add Jenkins repository
       get_url:
@@ -40,13 +92,14 @@
         key: https://pkg.jenkins.io/redhat-stable/jenkins.io.key
 
     - name: Install Jenkins
-      yum:
+      package:
         name: jenkins
         state: present
+        disable_gpg_check: yes
       when: ansible_os_family == "RedHat"
 
     - name: Install Maven
-      yum:
+      package:
         name: maven
         state: present
       when: ansible_os_family == "RedHat"
@@ -57,17 +110,20 @@
         state: started
         enabled: yes
 
+    - name: Verify Jenkins process is running
+      command: systemctl status jenkins
+      register: jenkins_status
+      changed_when: false
+
     - name: Wait for Jenkins to start
       uri:
         url: http://localhost:8080/
-        status_code: 200
+        status_code: [200, 403]
       register: result
-      until: result.status == 200
+      until: result.status in [200, 403]
       retries: 30
       delay: 10
-      ignore_errors: yes
-      
-    # New tasks for GitHub integration
+
     - name: Get Jenkins admin password
       command: cat /var/lib/jenkins/secrets/initialAdminPassword
       register: jenkins_admin_password
@@ -79,17 +135,22 @@
         dest: "/tmp/jenkins-cli.jar"
         mode: '0644'
         
-    - name: Install Jenkins plugins
+    - name: Install Jenkins plugins individually
       command: >
         java -jar /tmp/jenkins-cli.jar -s http://localhost:8080/ -auth admin:{{ jenkins_admin_password.stdout }} 
-        install-plugin {{ jenkins_plugins | join(' ') }} -deploy
+        install-plugin {{ item }} -deploy
+      loop: "{{ jenkins_plugins }}"
       register: plugin_result
-      changed_when: "'Installing' in plugin_result.stdout"
+      failed_when: plugin_result.rc != 0 and 'already installed' not in plugin_result.stderr|default('')
+      changed_when: "'Installing' in plugin_result.stdout|default('')"
+      retries: 3
+      delay: 10
+      until: plugin_result is success or ('already installed' in plugin_result.stderr|default(''))
       notify: Restart Jenkins
       
     - name: Create GitHub webhook credentials
       shell: |
-        cat > /tmp/create_credential.groovy << 'EOF'
+        cat > /tmp/create_credential.groovy << EOF
         import jenkins.model.*
         import com.cloudbees.plugins.credentials.*
         import com.cloudbees.plugins.credentials.common.*
@@ -100,18 +161,32 @@
         def domain = Domain.global()
         def store = Jenkins.instance.getExtensionList('com.cloudbees.plugins.credentials.SystemCredentialsProvider')[0].getStore()
         
+        // Get credentials from environment variables or use default values for testing
+        def githubUsername = System.getenv('GITHUB_USERNAME') ?: 'placeholder-username'
+        def githubToken = System.getenv('GITHUB_TOKEN') ?: 'placeholder-token'
+        
+        // Create credentials using values from environment variables
         def githubCredentials = new UsernamePasswordCredentialsImpl(
           CredentialsScope.GLOBAL,
           'github-credentials',
           'GitHub access',
-          'MaVeN-13TTN',
-          'your-github-token'
+          githubUsername,
+          githubToken
         )
         
         store.addCredentials(domain, githubCredentials)
         EOF
         
+        # Export GitHub credentials as environment variables before running the script
+        export GITHUB_USERNAME="{{ github_username | default('placeholder-username') }}"
+        export GITHUB_TOKEN="{{ github_token | default('placeholder-token') }}"
+        
         java -jar /tmp/jenkins-cli.jar -s http://localhost:8080/ -auth admin:{{ jenkins_admin_password.stdout }} groovy = < /tmp/create_credential.groovy
+        rm -f /tmp/create_credential.groovy
+        
+        # Create a marker file to indicate credentials have been set up
+        mkdir -p /var/lib/jenkins/.ssh
+        touch /var/lib/jenkins/.ssh/github_credentials_created
       args:
         creates: /var/lib/jenkins/.ssh/github_credentials_created
       notify: Restart Jenkins

@@ -1,0 +1,58 @@
+# Java related
+*.class
+*.jar
+*.war
+*.ear
+target/
+
+# IDE files
+.idea/
+.vscode/
+*.iml
+*.iws
+*.ipr
+.classpath
+.project
+.settings/
+
+# Terraform files
+infrastructure/terraform/.terraform/
+infrastructure/terraform/terraform.tfstate
+infrastructure/terraform/terraform.tfstate.backup
+infrastructure/terraform/.terraform.lock.hcl
+*.tfplan
+
+# Ansible files
+*.retry
+# Ansible vault files and credentials
+infrastructure/ansible/vars/github_credentials.yml
+*vault*
+*.vault
+*.vault.yml
+
+# IP Address summary and backup files
+ip_address_update_summary.txt
+*.bak
+
+# Logs
+*.log
+logs/
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Build and package files
+node_modules/
+dist/
+build/
+
+# Credentials and secrets
+*.pem
+*.key
+*.p12

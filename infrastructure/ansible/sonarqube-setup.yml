@@ -1,13 +1,15 @@
 ---
-- name: Install and Configure SonarQube
+- name: Install and Configure SonarQube 2025.1
   hosts: sonarqube
   become: yes
   vars:
+    sonarqube_version: "2025.1.1.104738"
+    sonarqube_download_url: "https://binaries.sonarsource.com/CommercialDistribution/sonarqube-enterprise/sonarqube-enterprise-2025.1.1.104738.zip"
     sonar_plugins:
       - github
       - java
       - jacoco
-  
+
   tasks:
     - name: Update packages
       yum:
@@ -16,15 +18,43 @@
         update_only: yes
       when: ansible_os_family == "RedHat"
 
-    - name: Install Java 11
-      yum:
-        name: java-11-openjdk-devel
-        state: present
-      when: ansible_os_family == "RedHat"
+    # Check if system is Amazon Linux
+    - name: Check if system is Amazon Linux
+      command: grep -q "Amazon Linux" /etc/os-release
+      register: is_amazon_linux
+      ignore_errors: yes
+      changed_when: false
 
+    # For Amazon Linux 2023
+    - name: Install Java 17 on Amazon Linux 2023
+      yum:
+        name:
+          - java-17-amazon-corretto
+          - java-17-amazon-corretto-devel
+        state: present
+      when: is_amazon_linux.rc == 0
+
+    # For other RedHat family systems
+    - name: Install Java 17 on other RedHat systems
+      yum:
+        name: java-17-openjdk-devel
+        state: present
+      when: is_amazon_linux.rc != 0 and ansible_os_family == "RedHat"
+
+    # Display installed Java version for validation
+    - name: Check installed Java version
+      command: java -version
+      register: java_version
+      changed_when: false
+    
+    - name: Display installed Java version
+      debug:
+        var: java_version.stderr
+
+    # Rest of the playbook continues as before
     - name: Install PostgreSQL
       yum:
-        name: 
+        name:
           - postgresql
           - postgresql-server
         state: present
@@ -44,8 +74,9 @@
 
     - name: Download SonarQube
       get_url:
-        url: https://binaries.sonarsource.com/Distribution/sonarqube/sonarqube-9.3.0.51899.zip
-        dest: /tmp/sonarqube.zip
+        url: "{{ sonarqube_download_url }}"
+        dest: "/tmp/sonarqube-{{ sonarqube_version }}.zip"
+        timeout: 300  # Extended timeout for larger file download
 
     - name: Install unzip
       yum:
@@ -55,53 +86,140 @@
 
     - name: Extract SonarQube
       unarchive:
-        src: /tmp/sonarqube.zip
+        src: "/tmp/sonarqube-{{ sonarqube_version }}.zip"
         dest: /opt/
         remote_src: yes
 
     - name: Create sonar user
       user:
         name: sonar
-        home: /opt/sonarqube
+        home: "/opt/sonarqube-{{ sonarqube_version }}"
         shell: /bin/bash
 
     - name: Set SonarQube ownership
       file:
-        path: /opt/sonarqube-9.3.0.51899
+        path: "/opt/sonarqube-{{ sonarqube_version }}"
         owner: sonar
         group: sonar
         recurse: yes
 
+    # Check if sonarqube directory exists
+    - name: Check if sonarqube directory exists
+      stat:
+        path: /opt/sonarqube
+      register: sonarqube_dir
+
+    # Remove existing directory if it's not a symlink
+    - name: Remove existing sonarqube directory if it's not a symlink
+      file:
+        path: /opt/sonarqube
+        state: absent
+      when: sonarqube_dir.stat.exists and not sonarqube_dir.stat.islnk
+
     - name: Create symbolic link
       file:
-        src: /opt/sonarqube-9.3.0.51899
+        src: "/opt/sonarqube-{{ sonarqube_version }}"
         dest: /opt/sonarqube
         state: link
-    
-    # New configurations for GitHub integration
-    - name: Configure SonarQube for GitHub integration
+
+    # Configure PostgreSQL for SonarQube
+    - name: Configure PostgreSQL for SonarQube
       blockinfile:
         path: /opt/sonarqube/conf/sonar.properties
         block: |
-          # GitHub integration
-          sonar.github.endpoint=https://api.github.com
-          sonar.github.appId.secured=your-github-app-id
-          sonar.github.privateKey.secured=/opt/sonarqube/conf/github-private-key.pem
-          sonar.pullrequest.provider=github
-          sonar.pullrequest.github.repository=MaVeN-13TTN/java-web-app
+          # PostgreSQL connection settings
+          sonar.jdbc.username=sonar
+          sonar.jdbc.password=sonar
+          sonar.jdbc.url=jdbc:postgresql://localhost/sonar
+          
+          # Listening on all interfaces
+          sonar.web.host=0.0.0.0
+          
+          # System configuration
+          sonar.search.javaOpts=-Xms512m -Xmx512m
+          sonar.web.javaOpts=-Xmx1G -Xms512m -XX:+HeapDumpOnOutOfMemoryError
         create: yes
         owner: sonar
         group: sonar
         mode: '0644'
       notify: Restart SonarQube
 
+    - name: Configure SonarQube for GitHub integration
+      blockinfile:
+        path: /opt/sonarqube/conf/sonar.properties
+        block: |
+          # GitHub integration
+          sonar.pullrequest.provider=github
+          sonar.pullrequest.github.repository=MaVeN-13TTN/java-web-app
+          sonar.alm.github.app.id=your-github-app-id
+          sonar.alm.github.app.private_key_path=/opt/sonarqube/conf/github-private-key.pem
+        owner: sonar
+        group: sonar
+        mode: '0644'
+      notify: Restart SonarQube
+
+    # Configure PostgreSQL user for SonarQube
+    - name: Create PostgreSQL user for SonarQube
+      become: yes
+      become_user: postgres
+      command: psql -c "CREATE USER sonar WITH ENCRYPTED PASSWORD 'sonar';"
+      register: create_user
+      failed_when: create_user.rc != 0 and "already exists" not in create_user.stderr
+      changed_when: create_user.rc == 0
+
+    # Create PostgreSQL database for SonarQube
+    - name: Create PostgreSQL database for SonarQube
+      become: yes
+      become_user: postgres
+      command: psql -c "CREATE DATABASE sonar OWNER sonar;"
+      register: create_db
+      failed_when: create_db.rc != 0 and "already exists" not in create_db.stderr
+      changed_when: create_db.rc == 0
+
+    # Configure PostgreSQL pg_hba.conf for SonarQube access
+    - name: Configure PostgreSQL pg_hba.conf
+      lineinfile:
+        path: /var/lib/pgsql/data/pg_hba.conf
+        line: "host    sonar       sonar       127.0.0.1/32            md5"
+        insertafter: EOF
+      notify: Restart PostgreSQL
+
+    # Increase system limits for SonarQube
+    - name: Configure system limits for SonarQube
+      blockinfile:
+        path: /etc/security/limits.conf
+        block: |
+          sonar   soft    nofile  65536
+          sonar   hard    nofile  65536
+        marker: "# {mark} ANSIBLE MANAGED BLOCK FOR SONARQUBE"
+        
+    # Configure system control settings for SonarQube
+    - name: Configure sysctl settings for SonarQube
+      sysctl:
+        name: vm.max_map_count
+        value: '262144'
+        state: present
+        sysctl_set: yes
+
     - name: Start SonarQube
       become: yes
       become_user: sonar
       command: /opt/sonarqube/bin/linux-x86-64/sonar.sh start
       
+    # Wait for SonarQube to start (can take a minute)
+    - name: Wait for SonarQube to start
+      wait_for:
+        port: 9000
+        delay: 10
+        timeout: 300
+
   handlers:
     - name: Restart SonarQube
       become: yes
       become_user: sonar
       command: /opt/sonarqube/bin/linux-x86-64/sonar.sh restart
+      
+    - name: Restart PostgreSQL
+      systemd:
+        name: postgresql
+        state: restarted

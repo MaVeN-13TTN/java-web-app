@@ -3,6 +3,13 @@
   hosts: monitoring
   become: yes
   tasks:
+    # Check for Amazon Linux
+    - name: Check if system is Amazon Linux
+      command: grep -q "Amazon Linux" /etc/os-release
+      register: is_amazon_linux
+      ignore_errors: yes
+      changed_when: false
+
     # Prometheus Setup
     - name: Create Prometheus system group
       group:
@@ -92,7 +99,22 @@
         daemon_reload: yes
 
     # Grafana Setup
-    - name: Add Grafana repository
+    - name: Add Grafana repository for Amazon Linux
+      copy:
+        content: |
+          [grafana]
+          name=grafana
+          baseurl=https://packages.grafana.com/oss/rpm
+          repo_gpgcheck=1
+          enabled=1
+          gpgcheck=1
+          gpgkey=https://packages.grafana.com/gpg.key
+          sslverify=1
+          sslcacert=/etc/pki/tls/certs/ca-bundle.crt
+        dest: /etc/yum.repos.d/grafana.repo
+      when: is_amazon_linux.rc == 0
+
+    - name: Add Grafana repository for other RedHat systems
       yum_repository:
         name: grafana
         description: Grafana repository
@@ -100,7 +122,7 @@
         gpgcheck: yes
         gpgkey: https://packages.grafana.com/gpg.key
         enabled: yes
-      when: ansible_os_family == "RedHat"
+      when: is_amazon_linux.rc != 0 and ansible_os_family == "RedHat"
 
     - name: Install Grafana
       yum:
